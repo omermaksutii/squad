@@ -12,6 +12,8 @@ import { runDoctor } from './commands/doctor.js';
 import { runInstall } from './commands/install.js';
 import { runDemo } from './commands/demo.js';
 import { runValidate } from './commands/validate.js';
+import { runRuns, runLogs } from './commands/runs.js';
+import { runUninstall } from './commands/uninstall.js';
 import { estimateCost } from './cost.js';
 
 export const VERSION = '1.0.0';
@@ -191,6 +193,28 @@ program
   .command('validate <file>')
   .description('Lint a custom recipe JSON file')
   .action(async (file: string) => { await runValidate(file); });
+
+program
+  .command('runs')
+  .description('List recent runs in the current project')
+  .option('--cwd <path>', 'Working directory to scan', process.cwd())
+  .option('-l, --limit <n>', 'Max runs to list', '10')
+  .action(async (opts: { cwd: string; limit: string }) => {
+    await runRuns({ cwd: opts.cwd, limit: Number(opts.limit) });
+  });
+
+program
+  .command('logs <run>')
+  .description('Print artifacts from a past run (id prefix or "last")')
+  .option('--cwd <path>', 'Working directory to scan', process.cwd())
+  .action(async (run: string, opts: { cwd: string }) => {
+    await runLogs({ cwd: opts.cwd, runId: run });
+  });
+
+program
+  .command('uninstall')
+  .description('Remove the /squad skill from Claude Code')
+  .action(async () => { await runUninstall(); });
 
 program.parseAsync(process.argv).catch(err => {
   console.error('squad:', err.message);

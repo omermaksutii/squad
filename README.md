@@ -130,8 +130,11 @@ squad run ./team-recipe.json "task description"
 | `squad list` | List built-in recipes |
 | `squad show <recipe>` | Show the DAG and per-agent details |
 | `squad run <recipe> "<task>"` | Execute a pipeline |
+| `squad runs` | List recent runs in the current project |
+| `squad logs <run \| last>` | Print artifacts from a past run |
 | `squad demo` | Self-contained echo-mode walkthrough |
 | `squad install` | Drop the `/squad` skill into Claude Code |
+| `squad uninstall` | Remove the `/squad` skill |
 | `squad doctor` | Diagnose your installation |
 | `squad new [name]` | Scaffold a custom recipe |
 | `squad validate <file>` | Lint a recipe JSON |
@@ -157,10 +160,12 @@ squad run ./team-recipe.json "task description"
 
 ```bash
 npm install
-npm test                # 23 tests, all in echo mode (no claude needed)
+npm test                # 39 tests across 9 suites, all echo mode (no claude needed)
 npm run build
 npm run lint
 ```
+
+CI runs the same on Node 20 + 22 via `.github/workflows/ci.yml`.
 
 ## License
 
