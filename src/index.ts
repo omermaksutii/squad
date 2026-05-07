@@ -7,10 +7,22 @@ import chalk from 'chalk';
 import { BUILTIN_RECIPE_NAMES, loadRecipe, planExecution } from './recipe.js';
 import { orchestrate } from './orchestrator.js';
 import { SquadTUI } from './tui.js';
+import { writeJsonResult } from './json-mode.js';
+import { runDoctor } from './commands/doctor.js';
+import { runInstall } from './commands/install.js';
+import { runDemo } from './commands/demo.js';
+import { runValidate } from './commands/validate.js';
+import { estimateCost } from './cost.js';
 
-export const VERSION = '0.1.0';
+export const VERSION = '1.0.0';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
+
+// --json pre-parse: works in any argv position
+if (process.argv.includes('--json')) {
+  process.env.SQUAD_JSON = '1';
+  process.argv = process.argv.filter(a => a !== '--json');
+}
 
 const program = new Command();
 program
@@ -22,9 +34,10 @@ program
   .command('list')
   .description('List built-in recipes')
   .action(async () => {
+    const recipes = await Promise.all(BUILTIN_RECIPE_NAMES.map(n => loadRecipe(n)));
+    if (writeJsonResult(recipes.map(r => ({ name: r.name, headline: r.headline, agents: r.agents.map(a => a.name) })))) return;
     console.log(chalk.bold('Built-in recipes:'));
-    for (const name of BUILTIN_RECIPE_NAMES) {
-      const r = await loadRecipe(name);
+    for (const r of recipes) {
       console.log('');
       console.log(`  ${chalk.cyan(r.name)} ${chalk.dim('—')} ${r.headline}`);
       console.log(`    ${chalk.dim('agents:')} ${r.agents.map(a => a.name).join(' → ')}`);
@@ -36,10 +49,15 @@ program
   .description('Print the recipe DAG and prompts')
   .action(async (name: string) => {
     const r = await loadRecipe(name);
+    const layers = planExecution(r);
+    if (writeJsonResult({
+      name: r.name,
+      description: r.description,
+      layers: layers.map(l => l.map(a => ({ name: a.name, model: a.model, dependsOn: a.dependsOn ?? [], description: a.description }))),
+    })) return;
     console.log(chalk.bold.cyan(r.name));
     console.log(r.description);
     console.log('');
-    const layers = planExecution(r);
     layers.forEach((layer, i) => {
       console.log(chalk.dim(`Layer ${i + 1}:`));
       for (const a of layer) {
@@ -73,11 +91,14 @@ program
     }
 
     const recipe = await loadRecipe(name);
-    const tui = opts.tui ? new SquadTUI(recipe.agents) : null;
+    const tuiEnabled = opts.tui && process.stdout.isTTY && process.env.SQUAD_JSON !== '1';
+    const tui = tuiEnabled ? new SquadTUI(recipe.agents) : null;
 
-    console.log(chalk.bold(`squad:${recipe.name}`), chalk.dim(`→ ${recipe.agents.length} agents`));
-    console.log(chalk.dim(`  task: ${task}`));
-    console.log('');
+    if (!tui && process.env.SQUAD_JSON !== '1') {
+      console.log(chalk.bold(`squad:${recipe.name}`), chalk.dim(`→ ${recipe.agents.length} agents`));
+      console.log(chalk.dim(`  task: ${task}`));
+      console.log('');
+    }
 
     const result = await orchestrate({
       recipe,
@@ -96,9 +117,28 @@ program
 
     tui?.finalize();
 
+    const cost = estimateCost(recipe.agents, result.results);
+
+    if (writeJsonResult({
+      recipe: result.recipe,
+      run_dir: result.runDir,
+      duration_ms: result.durationMs,
+      cost,
+      results: result.results.map(r => ({
+        agent: r.agent,
+        exit_code: r.exitCode,
+        artifact_path: r.artifactPath,
+        duration_ms: r.durationMs,
+      })),
+      failed: result.failed,
+    })) return;
+
     console.log('');
     console.log(chalk.bold(`done in ${(result.durationMs / 1000).toFixed(1)}s`));
     console.log(chalk.dim(`run dir: ${result.runDir}`));
+    if (!opts.echo) {
+      console.log(chalk.dim(`max budget: $${cost.totalMaxUsd.toFixed(2)} across ${cost.perAgent.length} agents`));
+    }
     if (result.failed.length) {
       console.log(chalk.red(`  ${result.failed.length} failures:`));
       for (const f of result.failed) console.log(chalk.red(`    ${f.agent}: ${f.error}`));
@@ -111,7 +151,8 @@ program
   });
 
 program
-  .command('init [recipe]')
+  .command('new [recipe]')
+  .alias('init')
   .description('Scaffold a custom recipe at ~/.squad/recipes/<name>.json')
   .action(async (recipe?: string) => {
     const home = process.env.HOME ?? '';
@@ -123,13 +164,44 @@ program
       process.exitCode = 1;
       return;
     }
-    const tmpl = await readFile(join(HERE, 'recipes', 'feature.json'), 'utf8');
+    const tmpl = await readFile(skillCandidate('recipes/feature.json'), 'utf8');
     await writeFile(target, tmpl);
     console.log(chalk.green('created'), target);
     console.log(chalk.dim('edit it, then run with `squad run <name> "task"`'));
   });
 
+program
+  .command('install')
+  .description('Install the /squad skill into Claude Code (~/.claude/skills/squad/)')
+  .option('--dry-run', 'Show what would be written without writing', false)
+  .option('-f, --force', 'Overwrite existing skill', false)
+  .action(async (opts: { dryRun: boolean; force: boolean }) => { await runInstall(opts); });
+
+program
+  .command('doctor')
+  .description('Diagnose your Squad installation')
+  .action(async () => { await runDoctor(); });
+
+program
+  .command('demo')
+  .description('Run a self-contained echo-mode demo (no claude needed, no tokens spent)')
+  .action(async () => { await runDemo(); });
+
+program
+  .command('validate <file>')
+  .description('Lint a custom recipe JSON file')
+  .action(async (file: string) => { await runValidate(file); });
+
 program.parseAsync(process.argv).catch(err => {
   console.error('squad:', err.message);
   process.exit(1);
 });
+
+function skillCandidate(rel: string): string {
+  const candidates = [
+    join(HERE, rel),
+    join(HERE, '..', 'src', rel),
+  ];
+  for (const c of candidates) if (existsSync(c)) return c;
+  return candidates[1]!;
+}

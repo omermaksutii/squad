@@ -1,6 +1,6 @@
 {
   "name": "@omermaksutii/squad",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Squad — opinionated subagent pipelines for Claude Code. One command, multi-agent in your terminal.",
   "license": "MIT",
   "author": "Omer Maksuti",
@@ -30,10 +30,11 @@
   "files": [
     "dist",
     "bin",
-    "src/recipes"
+    "src/recipes",
+    "assets"
   ],
   "scripts": {
-    "build": "tsc && node -e \"require('fs').cpSync('src/recipes','dist/recipes',{recursive:true})\"",
+    "build": "tsc && node -e \"const fs=require('fs');fs.cpSync('src/recipes','dist/recipes',{recursive:true});fs.cpSync('assets','dist/assets',{recursive:true})\"",
     "test": "vitest run",
     "lint": "tsc --noEmit"
   },

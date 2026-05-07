@@ -1,0 +1,34 @@
+{
+  "name": "onboard",
+  "description": "Onboarding pack: project map → quickstart → glossary → first issues",
+  "headline": "Generate an onboarding pack for a new contributor",
+  "agents": [
+    {
+      "name": "cartographer",
+      "description": "Map the codebase: directory roles, entry points, key modules",
+      "model": "opus",
+      "prompt": "TASK: {{task}}\n\nMap this codebase for a new contributor. Read the top-level layout. Identify:\n- Entry points (where execution starts)\n- Major modules and what they own\n- Build/test/run commands\n- External dependencies that aren't obvious\n\nWrite to {{outputPath}}:\n\n## TL;DR (3 sentences)\n## Layout\n```\n<tree of significant dirs with annotations>\n```\n## Entry points\n## Major modules\n| module | owns | depends on |\n## How to build/test/run\n## Things that surprised me\n\nDo not invent files. Cite real paths."
+    },
+    {
+      "name": "quickstart",
+      "description": "Write the 5-minute getting-started guide",
+      "dependsOn": ["cartographer"],
+      "model": "sonnet",
+      "prompt": "TASK: {{task}}\n\nMAP:\n{{cartographer}}\n\nWrite a true 5-minute quickstart. Imagine the reader is a senior engineer who has never seen this code. They want to:\n1. Get it running locally\n2. See it do something\n3. Find their way to making a change\n\nWrite to {{outputPath}}:\n\n# Quickstart\n\n## 1. Install\n(exact commands)\n\n## 2. Run\n(exact commands + what to expect)\n\n## 3. Make your first change\n(suggest a tiny, safe edit; tell them what file, what to change, how to verify)\n\n## Where to look next\n(3 files worth reading first)\n\nNo fluff. No 'welcome' paragraphs. Commands and file paths."
+    },
+    {
+      "name": "glossary-writer",
+      "description": "Build a glossary of project-specific terms a newcomer will hit",
+      "dependsOn": ["cartographer"],
+      "model": "haiku",
+      "prompt": "TASK: {{task}}\n\nMAP:\n{{cartographer}}\n\nFind project-specific terms / acronyms / internal names that a newcomer will encounter and need defined. Examples: domain terms, internal services, conventions like 'workers' or 'tracks' that have project-specific meaning.\n\nWrite to {{outputPath}}:\n\n# Glossary\n\n## <term>\nbrief definition (1-2 sentences). Where it shows up.\n\n## <term>\n...\n\n10-30 entries. Real terms from the code, not generic CS terms."
+    },
+    {
+      "name": "scout",
+      "description": "Find 3-5 good first issues from open issues / TODOs",
+      "dependsOn": ["cartographer"],
+      "model": "sonnet",
+      "prompt": "TASK: {{task}}\n\nMAP:\n{{cartographer}}\n\nFind 3-5 \"good first issue\" candidates. Sources:\n- Open GitHub issues labeled 'good first issue' or similar (if you can read them)\n- TODO/FIXME/HACK comments in the code\n- Documentation gaps\n- Test coverage gaps\n\nWrite to {{outputPath}}:\n\n# Good first issues\n\n## 1. <title>\n- where: file:line OR issue link\n- what: what to change\n- why it's good for onboarding: ...\n- estimated effort: <1h | 2-4h | 1d\n\n## 2. ...\n\nPick truly small, scoped, well-defined work. Reject anything that needs cross-cutting decisions."
+    }
+  ]
+}

@@ -53,6 +53,8 @@ export const BUILTIN_RECIPE_NAMES = [
   'security-review',
   'debug',
   'postmortem',
+  'release',
+  'onboard',
 ];
 
 export async function loadRecipe(nameOrPath: string): Promise<Recipe> {

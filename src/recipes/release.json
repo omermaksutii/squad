@@ -1,0 +1,34 @@
+{
+  "name": "release",
+  "description": "Cut a release: changelog → version bump → publish prep → announcement",
+  "headline": "Cut a release end-to-end with 4 specialist agents",
+  "agents": [
+    {
+      "name": "auditor",
+      "description": "Audit since the last tag — list what's actually changed",
+      "model": "sonnet",
+      "prompt": "TASK: {{task}}\n\nRun `git log` from the last tag to HEAD. List every commit with one-line summary. Categorize: feat / fix / chore / docs / breaking.\n\nWrite to {{outputPath}}:\n\n## Since the last tag\n## Categorized\n### Breaking\n### Features\n### Fixes\n### Chores\n## Notable\n## Suggested version bump (semver: major | minor | patch) and why\n\nBe precise. No spin."
+    },
+    {
+      "name": "scribe",
+      "description": "Write the CHANGELOG entry and bump the version",
+      "dependsOn": ["auditor"],
+      "model": "sonnet",
+      "prompt": "TASK: {{task}}\n\nAUDIT:\n{{auditor}}\n\nUpdate CHANGELOG.md with a new entry at the top. Bump package.json version per the auditor's recommendation. Make sure the version number used in CHANGELOG matches.\n\nWrite to {{outputPath}}:\n\n## Files modified\n- CHANGELOG.md\n- package.json (and lock if applicable)\n\n## New version\n## CHANGELOG entry preview\n(paste it)\n\nDo NOT git commit. Just modify the files."
+    },
+    {
+      "name": "verifier",
+      "description": "Run tests + lint + build before tagging",
+      "dependsOn": ["scribe"],
+      "model": "sonnet",
+      "prompt": "TASK: {{task}}\n\nSCRIBE:\n{{scribe}}\n\nRun the project's full pipeline: install (if needed), build, lint, test. Capture results. Do NOT publish.\n\nWrite to {{outputPath}}:\n\n## Build\n## Lint\n## Tests\n## Verdict\nshippable | needs-changes\n\nIf any step failed, list the exact error and stop here. Do not patch."
+    },
+    {
+      "name": "announcer",
+      "description": "Draft release notes + a one-line tweet/HN/Reddit announcement",
+      "dependsOn": ["verifier"],
+      "model": "opus",
+      "prompt": "TASK: {{task}}\n\nAUDIT:\n{{auditor}}\n\nCHANGELOG:\n{{scribe}}\n\nVERIFICATION:\n{{verifier}}\n\nDraft the release announcement.\n\nWrite to {{outputPath}}:\n\n## GitHub release body (markdown)\n## Tweet / X (under 280 chars)\n## HN Show HN title (one line)\n## Discord/Reddit one-liner\n\nMatch the project's tone (look at existing CHANGELOG/README). Lead with the user-visible change, not the implementation."
+    }
+  ]
+}
