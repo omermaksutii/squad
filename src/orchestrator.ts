@@ -11,6 +11,10 @@ export type OrchestrateOptions = {
   runDir?: string;
   /** Echo mode: do not spawn claude, just write deterministic stubs. */
   echo?: boolean;
+  /** Max concurrent agents per dependency layer. 0/undefined = unlimited. */
+  parallel?: number;
+  /** Retry an agent up to this many times on non-zero exit. Default 0 (no retry). */
+  retry?: number;
   /** Streaming line callback (pass to TUI). */
   onStdoutLine?: (line: string) => void;
   /** Status callback fired when an agent transitions state. */
@@ -52,21 +56,39 @@ export async function orchestrate(opts: OrchestrateOptions): Promise<Orchestrati
     opts.onStatusChange?.({ agent: a.name, status: 'pending' });
   }
 
+  const retry = Math.max(0, opts.retry ?? 0);
+  const parallel = opts.parallel && opts.parallel > 0 ? opts.parallel : Infinity;
+
   for (const layer of layers) {
-    // Run all agents in this dependency layer in parallel.
-    const settled = await Promise.allSettled(
-      layer.map(spec => {
-        opts.onStatusChange?.({ agent: spec.name, status: 'running' });
-        const runOpts: RunOptions = {
-          runDir,
-          cwd: opts.cwd,
-          vars: { task: opts.task },
-          echo: opts.echo,
-          onStdoutLine: opts.onStdoutLine,
-        };
-        return runAgent(spec, runOpts);
-      }),
-    );
+    // Run agents in this layer with bounded concurrency + per-agent retry.
+    const settled = await runWithConcurrency(layer, parallel, async spec => {
+      opts.onStatusChange?.({ agent: spec.name, status: 'running' });
+      let lastErr: unknown;
+      let lastResult: RunResult | undefined;
+      for (let attempt = 0; attempt <= retry; attempt++) {
+        try {
+          const r = await runAgent(spec, {
+            runDir,
+            cwd: opts.cwd,
+            vars: { task: opts.task },
+            echo: opts.echo,
+            onStdoutLine: opts.onStdoutLine,
+          });
+          lastResult = r;
+          if (r.exitCode === 0) return r;
+          lastErr = new Error(`exit ${r.exitCode}`);
+        } catch (err) {
+          lastErr = err;
+          if (attempt === retry) throw err;
+        }
+        if (attempt < retry) {
+          opts.onStdoutLine?.(`[${spec.name}] retrying (${attempt + 1}/${retry})…`);
+        }
+      }
+      // All attempts exhausted; return the last failed result if any
+      if (lastResult) return lastResult;
+      throw lastErr;
+    });
 
     for (let i = 0; i < settled.length; i++) {
       const spec = layer[i]!;
@@ -110,4 +132,26 @@ export async function orchestrate(opts: OrchestrateOptions): Promise<Orchestrati
   };
   await writeFile(join(runDir, 'summary.json'), JSON.stringify(summary, null, 2));
   return summary;
+}
+
+/** Run `tasks` through `worker` with up to `limit` concurrent in-flight at a time. */
+async function runWithConcurrency<T, R>(
+  tasks: T[],
+  limit: number,
+  worker: (item: T) => Promise<R>,
+): Promise<PromiseSettledResult<R>[]> {
+  const results: PromiseSettledResult<R>[] = new Array(tasks.length);
+  let next = 0;
+  const active: Promise<void>[] = [];
+  const launch = (): Promise<void> => {
+    const idx = next++;
+    if (idx >= tasks.length) return Promise.resolve();
+    return worker(tasks[idx]!)
+      .then(value => { results[idx] = { status: 'fulfilled', value }; })
+      .catch(reason => { results[idx] = { status: 'rejected', reason }; })
+      .then(() => launch());
+  };
+  for (let i = 0; i < Math.min(limit, tasks.length); i++) active.push(launch());
+  await Promise.all(active);
+  return results;
 }

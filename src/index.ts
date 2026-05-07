@@ -14,6 +14,8 @@ import { runDemo } from './commands/demo.js';
 import { runValidate } from './commands/validate.js';
 import { runRuns, runLogs } from './commands/runs.js';
 import { runUninstall } from './commands/uninstall.js';
+import { runExport } from './commands/export.js';
+import { renderGraph } from './graph.js';
 import { estimateCost } from './cost.js';
 
 export const VERSION = '1.0.0';
@@ -49,7 +51,8 @@ program
 program
   .command('show <recipe>')
   .description('Print the recipe DAG and prompts')
-  .action(async (name: string) => {
+  .option('--graph', 'Render the DAG as ASCII tree art', false)
+  .action(async (name: string, opts: { graph: boolean }) => {
     const r = await loadRecipe(name);
     const layers = planExecution(r);
     if (writeJsonResult({
@@ -57,6 +60,10 @@ program
       description: r.description,
       layers: layers.map(l => l.map(a => ({ name: a.name, model: a.model, dependsOn: a.dependsOn ?? [], description: a.description }))),
     })) return;
+    if (opts.graph) {
+      console.log(renderGraph(r));
+      return;
+    }
     console.log(chalk.bold.cyan(r.name));
     console.log(r.description);
     console.log('');
@@ -77,10 +84,12 @@ program
   .option('--echo', 'Do not call claude — echo prompts (for testing)', false)
   .option('--task-file <path>', 'Read the task description from a file instead of args')
   .option('--no-tui', 'Disable the live TUI; print plain logs')
+  .option('--parallel <n>', 'Max concurrent agents per layer (default unlimited)', '0')
+  .option('--retry <n>', 'Retry each agent up to N times on failure', '0')
   .action(async (
     name: string,
     taskParts: string[],
-    opts: { cwd: string; echo: boolean; taskFile?: string; tui: boolean },
+    opts: { cwd: string; echo: boolean; taskFile?: string; tui: boolean; parallel: string; retry: string },
   ) => {
     let task = taskParts.join(' ').trim();
     if (opts.taskFile) {
@@ -107,6 +116,8 @@ program
       task,
       cwd: opts.cwd,
       echo: opts.echo,
+      parallel: Number(opts.parallel),
+      retry: Number(opts.retry),
       onStdoutLine: (line: string) => tui?.log(line),
       onStatusChange: e => {
         tui?.set(e.agent, {
@@ -215,6 +226,13 @@ program
   .command('uninstall')
   .description('Remove the /squad skill from Claude Code')
   .action(async () => { await runUninstall(); });
+
+program
+  .command('export <recipe>')
+  .description('Export a built-in recipe to ~/.squad/recipes/ for editing')
+  .option('--rename <name>', 'Save under a different name')
+  .option('--to <path>', 'Custom destination path')
+  .action(async (name: string, opts: { rename?: string; to?: string }) => { await runExport(name, opts); });
 
 program.parseAsync(process.argv).catch(err => {
   console.error('squad:', err.message);
