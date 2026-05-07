@@ -1,12 +1,22 @@
 import type { AgentSpec } from './recipe.js';
 import type { RunResult } from './runner.js';
 
-/** A coarse cost estimate based on recipe budgets. Real per-call cost requires
- * parsing claude's --output-format json output; that lands in v1.1. */
 export type CostEstimate = {
-  perAgent: { name: string; maxBudgetUsd: number; durationMs: number; spent?: number }[];
+  perAgent: {
+    name: string;
+    maxBudgetUsd: number;
+    durationMs: number;
+    spent?: number;
+    inputTokens?: number;
+    outputTokens?: number;
+  }[];
   totalMaxUsd: number;
+  totalSpentUsd: number;
   totalDurationMs: number;
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  /** True when at least one agent reported real cost via stream-json. */
+  hasRealCost: boolean;
 };
 
 export function estimateCost(specs: AgentSpec[], results: RunResult[]): CostEstimate {
@@ -18,11 +28,18 @@ export function estimateCost(specs: AgentSpec[], results: RunResult[]): CostEsti
       maxBudgetUsd: s.maxBudgetUsd ?? 0.5,
       durationMs: r?.durationMs ?? 0,
       spent: r?.costUsd,
+      inputTokens: r?.tokens?.input,
+      outputTokens: r?.tokens?.output,
     };
   });
+  const totalSpentUsd = perAgent.reduce((acc, a) => acc + (a.spent ?? 0), 0);
   return {
     perAgent,
     totalMaxUsd: perAgent.reduce((acc, a) => acc + a.maxBudgetUsd, 0),
+    totalSpentUsd,
     totalDurationMs: perAgent.reduce((acc, a) => acc + a.durationMs, 0),
+    totalInputTokens: perAgent.reduce((acc, a) => acc + (a.inputTokens ?? 0), 0),
+    totalOutputTokens: perAgent.reduce((acc, a) => acc + (a.outputTokens ?? 0), 0),
+    hasRealCost: perAgent.some(a => typeof a.spent === 'number'),
   };
 }

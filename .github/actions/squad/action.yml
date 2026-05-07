@@ -1,0 +1,40 @@
+name: 'Squad'
+description: 'Run a Squad multi-agent pipeline as a GitHub Action'
+inputs:
+  recipe:
+    description: 'Built-in recipe name (feature/bugfix/refactor/security-review/debug/postmortem/release/onboard) or path/URL to a custom recipe JSON'
+    required: true
+  task:
+    description: 'Task description'
+    required: true
+  parallel:
+    description: 'Max concurrent agents per layer'
+    required: false
+    default: '0'
+  retry:
+    description: 'Retry each agent up to N times on failure'
+    required: false
+    default: '0'
+  squad-version:
+    description: 'Squad version to use (npm tag or version)'
+    required: false
+    default: 'latest'
+runs:
+  using: 'composite'
+  steps:
+    - name: Install Squad
+      shell: bash
+      run: npm install -g @omermaksutii/squad@${{ inputs.squad-version }}
+    - name: Run pipeline
+      shell: bash
+      run: |
+        squad run "${{ inputs.recipe }}" "${{ inputs.task }}" \
+          --parallel "${{ inputs.parallel }}" \
+          --retry "${{ inputs.retry }}" \
+          --no-tui
+    - name: Upload artifacts
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: squad-run
+        path: .squad/runs/

@@ -15,7 +15,11 @@ import { runValidate } from './commands/validate.js';
 import { runRuns, runLogs } from './commands/runs.js';
 import { runUninstall } from './commands/uninstall.js';
 import { runExport } from './commands/export.js';
+import { runWatch } from './commands/watch.js';
+import { runResume } from './commands/resume.js';
+import { emitCompletion } from './commands/completion.js';
 import { renderGraph } from './graph.js';
+import { renderMermaid } from './mermaid.js';
 import { estimateCost } from './cost.js';
 
 export const VERSION = '1.0.0';
@@ -52,7 +56,8 @@ program
   .command('show <recipe>')
   .description('Print the recipe DAG and prompts')
   .option('--graph', 'Render the DAG as ASCII tree art', false)
-  .action(async (name: string, opts: { graph: boolean }) => {
+  .option('--mermaid', 'Output Mermaid `flowchart TD` syntax', false)
+  .action(async (name: string, opts: { graph: boolean; mermaid: boolean }) => {
     const r = await loadRecipe(name);
     const layers = planExecution(r);
     if (writeJsonResult({
@@ -60,6 +65,10 @@ program
       description: r.description,
       layers: layers.map(l => l.map(a => ({ name: a.name, model: a.model, dependsOn: a.dependsOn ?? [], description: a.description }))),
     })) return;
+    if (opts.mermaid) {
+      console.log(renderMermaid(r));
+      return;
+    }
     if (opts.graph) {
       console.log(renderGraph(r));
       return;
@@ -86,10 +95,11 @@ program
   .option('--no-tui', 'Disable the live TUI; print plain logs')
   .option('--parallel <n>', 'Max concurrent agents per layer (default unlimited)', '0')
   .option('--retry <n>', 'Retry each agent up to N times on failure', '0')
+  .option('--dry-run', 'Show what would happen without spawning agents', false)
   .action(async (
     name: string,
     taskParts: string[],
-    opts: { cwd: string; echo: boolean; taskFile?: string; tui: boolean; parallel: string; retry: string },
+    opts: { cwd: string; echo: boolean; taskFile?: string; tui: boolean; parallel: string; retry: string; dryRun: boolean },
   ) => {
     let task = taskParts.join(' ').trim();
     if (opts.taskFile) {
@@ -102,6 +112,31 @@ program
     }
 
     const recipe = await loadRecipe(name);
+
+    if (opts.dryRun) {
+      const layers = planExecution(recipe);
+      const totalBudget = recipe.agents.reduce((acc, a) => acc + (a.maxBudgetUsd ?? 0.5), 0);
+      if (writeJsonResult({
+        recipe: recipe.name, task, agents: recipe.agents.length,
+        layers: layers.length, total_max_usd: totalBudget,
+        plan: layers.map(l => l.map(a => ({ name: a.name, model: a.model, max_budget_usd: a.maxBudgetUsd ?? 0.5 }))),
+      })) return;
+      console.log(chalk.bold(`dry run · squad:${recipe.name}`));
+      console.log(chalk.dim(`  task: ${task}`));
+      console.log(chalk.dim(`  cwd:  ${opts.cwd}`));
+      console.log(chalk.dim(`  ${recipe.agents.length} agents · ${layers.length} layers · max budget $${totalBudget.toFixed(2)}`));
+      console.log('');
+      layers.forEach((layer, i) => {
+        console.log(chalk.dim(`  Layer ${i + 1}:`));
+        for (const a of layer) {
+          console.log(`    ${chalk.cyan(a.name)} ${chalk.dim(`(${a.model}, max $${(a.maxBudgetUsd ?? 0.5).toFixed(2)})`)}`);
+        }
+      });
+      console.log('');
+      console.log(chalk.dim('rerun without --dry-run to execute'));
+      return;
+    }
+
     const tuiEnabled = opts.tui && process.stdout.isTTY && process.env.SQUAD_JSON !== '1';
     const tui = tuiEnabled ? new SquadTUI(recipe.agents) : null;
 
@@ -150,7 +185,13 @@ program
     console.log(chalk.bold(`done in ${(result.durationMs / 1000).toFixed(1)}s`));
     console.log(chalk.dim(`run dir: ${result.runDir}`));
     if (!opts.echo) {
-      console.log(chalk.dim(`max budget: $${cost.totalMaxUsd.toFixed(2)} across ${cost.perAgent.length} agents`));
+      if (cost.hasRealCost) {
+        const totalIn = cost.totalInputTokens.toLocaleString();
+        const totalOut = cost.totalOutputTokens.toLocaleString();
+        console.log(chalk.dim(`real cost: $${cost.totalSpentUsd.toFixed(4)} · ${totalIn} in / ${totalOut} out tokens`));
+      } else {
+        console.log(chalk.dim(`max budget: $${cost.totalMaxUsd.toFixed(2)} across ${cost.perAgent.length} agents`));
+      }
     }
     if (result.failed.length) {
       console.log(chalk.red(`  ${result.failed.length} failures:`));
@@ -233,6 +274,37 @@ program
   .option('--rename <name>', 'Save under a different name')
   .option('--to <path>', 'Custom destination path')
   .action(async (name: string, opts: { rename?: string; to?: string }) => { await runExport(name, opts); });
+
+program
+  .command('watch <recipe> [task...]')
+  .description('Re-run a recipe whenever files in cwd change')
+  .option('--cwd <path>', 'Working directory to watch', process.cwd())
+  .option('--debounce <ms>', 'Wait this long after a change before triggering', '500')
+  .option('--echo', 'Use echo mode (for testing)', false)
+  .action(async (name: string, taskParts: string[], opts: { cwd: string; debounce: string; echo: boolean }) => {
+    const task = taskParts.join(' ').trim();
+    if (!task) {
+      console.error(chalk.red('error: task is required'));
+      process.exitCode = 2;
+      return;
+    }
+    await runWatch(name, task, { cwd: opts.cwd, debounceMs: Number(opts.debounce), echo: opts.echo });
+  });
+
+program
+  .command('resume <run>')
+  .description('Resume a partial run (re-runs only failed/skipped agents)')
+  .option('--cwd <path>', 'Working directory to scan for runs', process.cwd())
+  .option('--echo', 'Echo mode', false)
+  .option('--no-tui', 'Disable the live TUI')
+  .action(async (run: string, opts: { cwd: string; echo: boolean; tui: boolean }) => {
+    await runResume(run, opts);
+  });
+
+program
+  .command('completion <shell>')
+  .description('Print shell completion script (bash | zsh | fish)')
+  .action((shell: string) => emitCompletion(shell));
 
 program.parseAsync(process.argv).catch(err => {
   console.error('squad:', err.message);

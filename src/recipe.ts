@@ -2,46 +2,39 @@ import { readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { get as httpGet } from 'node:http';
+import { get as httpsGet } from 'node:https';
 
 export type AgentSpec = {
   name: string;
   description: string;
-  /** Agent prompt template. Variables: {{task}}, {{cwd}}, {{artifactDir}}, {{<dependency>}}. */
   prompt: string;
-  /** Names of agents that must finish before this one starts. */
   dependsOn?: string[];
-  /** Model to use: haiku, sonnet, opus. Default sonnet. */
   model?: 'haiku' | 'sonnet' | 'opus';
-  /** Max budget in USD per agent. Default 0.50. */
   maxBudgetUsd?: number;
-  /** Restrict allowed tools (passed via --allowedTools). */
   allowedTools?: string[];
-  /** Wall-clock timeout in seconds. Default 300. */
   timeoutSec?: number;
 };
 
 export type Recipe = {
   name: string;
   description: string;
-  /** One-line headline shown in `squad list`. */
   headline: string;
   agents: AgentSpec[];
 };
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
-// Recipes ship as src/recipes/*.json (declared in package.json "files").
-// At runtime we may be in dist/ — look in both spots.
 function builtinDir(): string {
   const candidates = [
-    join(HERE, 'recipes'),                  // dist/recipes (if copied during build)
-    join(HERE, '..', 'src', 'recipes'),     // dist/../src/recipes (shipped layout)
-    join(HERE, '..', '..', 'src', 'recipes'), // some bundlers add another level
+    join(HERE, 'recipes'),
+    join(HERE, '..', 'src', 'recipes'),
+    join(HERE, '..', '..', 'src', 'recipes'),
   ];
   for (const c of candidates) {
     if (existsSync(join(c, 'feature.json'))) return c;
   }
-  return candidates[1]!; // sensible default; loadRecipe will surface the ENOENT
+  return candidates[1]!;
 }
 
 const BUILTIN_DIR = builtinDir();
@@ -57,28 +50,66 @@ export const BUILTIN_RECIPE_NAMES = [
   'onboard',
 ];
 
-export async function loadRecipe(nameOrPath: string): Promise<Recipe> {
-  // Try built-in first
+export async function loadRecipe(nameOrPath: string, _seen: Set<string> = new Set()): Promise<Recipe> {
+  // URL fetch
+  if (/^https?:\/\//.test(nameOrPath)) {
+    const json = await fetchUrl(nameOrPath);
+    return await resolveExtends(parseRecipe(json, nameOrPath), _seen);
+  }
   if (BUILTIN_RECIPE_NAMES.includes(nameOrPath)) {
     const path = join(BUILTIN_DIR, `${nameOrPath}.json`);
-    return parseRecipe(await readFile(path, 'utf8'), path);
+    return await resolveExtends(parseRecipe(await readFile(path, 'utf8'), path), _seen);
   }
-  // Then try user override at ~/.squad/recipes/<name>.json
   const homeRecipe = join(process.env.HOME ?? '', '.squad', 'recipes', `${nameOrPath}.json`);
   if (existsSync(homeRecipe)) {
-    return parseRecipe(await readFile(homeRecipe, 'utf8'), homeRecipe);
+    return await resolveExtends(parseRecipe(await readFile(homeRecipe, 'utf8'), homeRecipe), _seen);
   }
-  // Then assume it's a literal path
   if (existsSync(nameOrPath)) {
-    return parseRecipe(await readFile(nameOrPath, 'utf8'), nameOrPath);
+    return await resolveExtends(parseRecipe(await readFile(nameOrPath, 'utf8'), nameOrPath), _seen);
   }
   throw new Error(
     `recipe "${nameOrPath}" not found. Built-ins: ${BUILTIN_RECIPE_NAMES.join(', ')}.\n` +
-      `Or pass a path to your own JSON file.`,
+      `Or pass a path/URL to your own JSON file.`,
   );
 }
 
-export function parseRecipe(json: string, source: string): Recipe {
+async function fetchUrl(url: string): Promise<string> {
+  const get = url.startsWith('https') ? httpsGet : httpGet;
+  return await new Promise<string>((resolve, reject) => {
+    get(url, res => {
+      if ((res.statusCode ?? 0) >= 400) {
+        reject(new Error(`fetch ${url}: HTTP ${res.statusCode}`));
+        return;
+      }
+      let buf = '';
+      res.on('data', chunk => { buf += chunk.toString(); });
+      res.on('end', () => resolve(buf));
+      res.on('error', reject);
+    }).on('error', reject);
+  });
+}
+
+async function resolveExtends(recipe: Recipe & { extends?: string }, seen: Set<string>): Promise<Recipe> {
+  if (!recipe.extends) return recipe;
+  if (seen.has(recipe.name)) {
+    throw new Error(`recipe inheritance cycle through ${recipe.name}`);
+  }
+  seen.add(recipe.name);
+  const parent = await loadRecipe(recipe.extends, seen);
+  const overrideMap = new Map(recipe.agents.map(a => [a.name, a]));
+  const mergedAgents: AgentSpec[] = parent.agents.map(p => overrideMap.get(p.name) ?? p);
+  for (const a of recipe.agents) {
+    if (!parent.agents.find(p => p.name === a.name)) mergedAgents.push(a);
+  }
+  return {
+    name: recipe.name,
+    description: recipe.description || parent.description,
+    headline: recipe.headline || parent.headline,
+    agents: mergedAgents,
+  };
+}
+
+export function parseRecipe(json: string, source: string): Recipe & { extends?: string } {
   let raw: unknown;
   try {
     raw = JSON.parse(json);
@@ -88,11 +119,16 @@ export function parseRecipe(json: string, source: string): Recipe {
   if (!isPlainObject(raw)) throw new Error(`recipe ${source}: must be a JSON object`);
   const r = raw as Record<string, unknown>;
   if (typeof r.name !== 'string' || !r.name) throw new Error(`recipe ${source}: missing "name"`);
-  if (typeof r.description !== 'string') throw new Error(`recipe ${source}: missing "description"`);
-  if (!Array.isArray(r.agents) || r.agents.length === 0)
+  const isExtending = typeof r.extends === 'string' && r.extends;
+  if (!isExtending && typeof r.description !== 'string') {
+    throw new Error(`recipe ${source}: missing "description"`);
+  }
+  if (!Array.isArray(r.agents)) r.agents = [];
+  if (!isExtending && (r.agents as unknown[]).length === 0) {
     throw new Error(`recipe ${source}: must have at least one agent`);
+  }
 
-  const agents: AgentSpec[] = r.agents.map((a, i) => {
+  const agents: AgentSpec[] = (r.agents as unknown[]).map((a, i) => {
     if (!isPlainObject(a)) throw new Error(`recipe ${source}: agent[${i}] must be an object`);
     const o = a as Record<string, unknown>;
     if (typeof o.name !== 'string' || !o.name)
@@ -111,23 +147,27 @@ export function parseRecipe(json: string, source: string): Recipe {
     };
   });
 
-  // Validate dependency graph
-  const names = new Set(agents.map(a => a.name));
-  for (const a of agents) {
-    for (const d of a.dependsOn ?? []) {
-      if (!names.has(d)) throw new Error(`recipe ${source}: agent ${a.name} depends on unknown "${d}"`);
+  // Only validate dep graph in non-extending recipes (extending recipes may
+  // omit deps that are inherited from the parent)
+  if (!isExtending) {
+    const names = new Set(agents.map(a => a.name));
+    for (const a of agents) {
+      for (const d of a.dependsOn ?? []) {
+        if (!names.has(d)) throw new Error(`recipe ${source}: agent ${a.name} depends on unknown "${d}"`);
+      }
     }
   }
 
-  return {
+  const out: Recipe & { extends?: string } = {
     name: r.name,
-    description: r.description,
-    headline: typeof r.headline === 'string' ? r.headline : r.description,
+    description: typeof r.description === 'string' ? r.description : '',
+    headline: typeof r.headline === 'string' ? r.headline : (typeof r.description === 'string' ? r.description : ''),
     agents,
   };
+  if (typeof r.extends === 'string') out.extends = r.extends;
+  return out;
 }
 
-/** Topological sort. Throws on cycles. Returns a flat list in run order. */
 export function planExecution(recipe: Recipe): AgentSpec[][] {
   const remaining = new Set(recipe.agents.map(a => a.name));
   const done = new Set<string>();
