@@ -8,8 +8,7 @@
 ```
 $ squad run feature "add OAuth2 login to /auth endpoint"
 
-squad:feature → 5 agents
-
+🟢 squad
   agent          status      duration   artifact
   ─────          ──────      ────────   ────────
   researcher     ✓ done      8.2s       .squad/runs/.../researcher.md
@@ -21,26 +20,36 @@ squad:feature → 5 agents
 
 ## Why
 
-Subagents in Claude Code are powerful but wiring them is painful — you write the same `Task(...)` boilerplate every time, you forget what handoffs each role needs, you reinvent the prompt for each new feature. **Squad ships 6 production-grade pipelines** with named roles, real handoffs between agents, and a live TUI showing progress.
+Subagents in Claude Code are powerful but wiring them is painful — same boilerplate every time, you forget what handoffs each role needs, you reinvent prompts for each new feature. **Squad ships 8 production-grade pipelines** with named roles, file-based handoffs, and a live TUI.
 
 ## Install
 
 ```bash
 npm install -g @omermaksutii/squad
+squad install     # adds /squad skill to your Claude Code
+squad doctor      # verify
 ```
 
-You also need [Claude Code](https://www.anthropic.com/claude-code) on your PATH (`claude` binary). Squad spawns headless `claude -p` instances under the hood — one per agent.
+You also need [Claude Code](https://www.anthropic.com/claude-code) on your PATH. Squad spawns headless `claude -p` instances under the hood — one per agent.
 
-## Run a pipeline
+## Try it without spending tokens
 
 ```bash
-# 5-agent feature pipeline
+squad demo
+```
+
+Spins up a fake project in a temp dir, runs the `feature` recipe in echo mode, prints all 5 agent artifacts. No `claude` calls, no tokens.
+
+## Run a real pipeline
+
+```bash
+# 5-agent feature implementation
 squad run feature "add OAuth2 login to /auth endpoint"
 
 # 3-agent bug investigation
 squad run bugfix "users sometimes see 500 on POST /signup with empty password"
 
-# refactor with invariant checking
+# refactor with invariant enforcement
 squad run refactor "extract auth middleware out of app.ts"
 
 # security audit
@@ -51,6 +60,12 @@ squad run debug "intermittent 504 on uploads larger than 5MB"
 
 # postmortem from logs/PRs/chat
 squad run postmortem "Tuesday's payment outage"
+
+# cut a new release
+squad run release "1.4.0"
+
+# generate an onboarding pack for a new contributor
+squad run onboard "for a new backend contributor"
 ```
 
 ## Built-in recipes
@@ -63,8 +78,10 @@ squad run postmortem "Tuesday's payment outage"
 | `security-review` | auditor → reporter | Find and triage security issues |
 | `debug` | hypothesizer → instrumenter → analyst | Narrow down hard-to-reproduce bugs |
 | `postmortem` | researcher → writer | Build incident timelines + action items |
+| `release` | auditor → scribe → verifier → announcer | Cut a version end-to-end |
+| `onboard` | cartographer → quickstart → glossary → scout | Onboarding pack for new contributors |
 
-`squad list` to see them all, `squad show <recipe>` to inspect a recipe's DAG and prompts.
+`squad list` to see them all, `squad show <recipe>` to inspect any recipe's DAG and prompts.
 
 ## How it works
 
@@ -72,7 +89,7 @@ squad run postmortem "Tuesday's payment outage"
 squad run feature "..."
    │
    ▼
-loads .json recipe → topologically sorts agents → runs each layer in parallel
+loads JSON recipe → topologically sorts agents → runs each layer in parallel
    │
    ▼
 spawns `claude -p --model X --append-system-prompt "you are <role>"`
@@ -85,17 +102,18 @@ later agents see earlier agents' artifacts inlined into their prompts
 ```
 
 Recipes are plain JSON. Each agent declares:
-- `name` and `description` (role)
+- `name`, `description` (role)
 - `prompt` (template; supports `{{task}}`, `{{cwd}}`, `{{<previous-agent>}}`)
 - `dependsOn` (other agents whose artifacts must exist before this one runs)
 - `model` (haiku/sonnet/opus)
-- `maxBudgetUsd`, `timeoutSec`, `allowedTools`
+- `maxBudgetUsd`, `timeoutSec`, `allowedTools` (safety knobs)
 
 ## Custom recipes
 
 ```bash
-squad init my-pipeline
-# edits ~/.squad/recipes/my-pipeline.json
+squad new my-pipeline      # scaffolds ~/.squad/recipes/my-pipeline.json
+$EDITOR ~/.squad/recipes/my-pipeline.json
+squad validate ~/.squad/recipes/my-pipeline.json
 squad run my-pipeline "task description"
 ```
 
@@ -105,27 +123,44 @@ Or pass a literal path:
 squad run ./team-recipe.json "task description"
 ```
 
+## CLI reference
+
+| Command | Description |
+|---|---|
+| `squad list` | List built-in recipes |
+| `squad show <recipe>` | Show the DAG and per-agent details |
+| `squad run <recipe> "<task>"` | Execute a pipeline |
+| `squad demo` | Self-contained echo-mode walkthrough |
+| `squad install` | Drop the `/squad` skill into Claude Code |
+| `squad doctor` | Diagnose your installation |
+| `squad new [name]` | Scaffold a custom recipe |
+| `squad validate <file>` | Lint a recipe JSON |
+| `squad --json <subcommand>` | Machine-readable output (every command supports it) |
+
 ## Cost & safety
 
-- Each agent has a `--max-budget-usd` cap (default $0.50). The whole pipeline can be tightly bounded.
-- Pipelines write everything to `.squad/runs/<timestamp>/`. Nothing is global, nothing leaks.
+- Each agent has a `--max-budget-usd` cap (default $0.50). The whole pipeline is bounded.
+- All output goes under `.squad/runs/<timestamp>/`. Nothing global, nothing leaks.
 - `--echo` mode runs the orchestrator without spawning Claude — useful for debugging recipes.
-
-## Stack
-
-- TypeScript
-- `commander` for the CLI
-- `chalk` for the TUI
-- `claude -p` (Claude Code's headless mode) for each agent
-- File-based handoff between agents (`.squad/runs/<ts>/artifacts/`)
+- `squad validate` lints custom recipes before you run them.
 
 ## Roadmap
 
-- ✅ **v0.1** — 6 built-in recipes, CLI, live TUI, echo mode, `squad init` for custom recipes
-- ⏳ **v0.2** — `/squad` skill so you can invoke from inside Claude Code
-- ⏳ **v0.3** — recipe registry (browse + install community recipes)
-- ⏳ **v0.4** — visible agent-to-agent messaging (not just file handoff)
-- ⏳ **v1.0** — sandbox mode (E2B/Docker), parallel execution metrics, GitHub Action
+- ✅ **v1.0** — 8 built-in recipes, CLI, live TUI, echo mode, `/squad` skill, doctor, install, demo, validate, --json
+- ⏳ **v1.1** — visible agent-to-agent messaging in the TUI
+- ⏳ **v1.2** — recipe registry (browse + install community recipes)
+- ⏳ **v1.3** — sandbox mode (E2B/Docker)
+- ⏳ **v1.4** — GitHub Action / CI integration
+- ⏳ **v2.0** — parallel-execution metrics, real per-call cost from claude `--output-format json`
+
+## Development
+
+```bash
+npm install
+npm test                # 23 tests, all in echo mode (no claude needed)
+npm run build
+npm run lint
+```
 
 ## License
 
