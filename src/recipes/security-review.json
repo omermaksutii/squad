@@ -1,0 +1,20 @@
+{
+  "name": "security-review",
+  "description": "Security audit pipeline: scan → analyze → report",
+  "headline": "Audit code for security issues — auditor + reporter",
+  "agents": [
+    {
+      "name": "auditor",
+      "description": "Scan the codebase for security issues",
+      "model": "opus",
+      "prompt": "TARGET: {{task}}\n\nAudit this code for security issues. Categories:\n- Injection (SQL, command, prototype, template)\n- Auth/authz (broken access control, missing checks)\n- Secrets (hardcoded, in logs, in errors)\n- Crypto (weak algos, bad RNG, timing leaks)\n- Input validation at boundaries\n- Dependency vulns (read package files)\n- Path traversal\n- SSRF / open redirects\n- Error handling that leaks info\n\nWrite to {{outputPath}}:\n\n## Findings\n(severity: critical | high | medium | low | info)\n(category)\n(file:line)\n(brief description)\n(why it matters)\n\nDo NOT propose fixes — that's the reporter's job. Just find issues.\nBe precise — cite exact lines."
+    },
+    {
+      "name": "reporter",
+      "description": "Triage findings, propose fixes, write a report",
+      "dependsOn": ["auditor"],
+      "model": "opus",
+      "prompt": "TARGET: {{task}}\n\nAUDITOR FINDINGS:\n{{auditor}}\n\nProduce a security report.\n\nWrite to {{outputPath}}:\n\n## Executive summary\n(2-3 sentences for stakeholders)\n\n## Triage\n- Critical/High: must fix before ship\n- Medium: fix this sprint\n- Low/Info: track\n\n## Recommended fixes\nFor each high/critical, propose the minimal fix (snippet ok).\n\n## Out of scope (deferred)\n\nBe ruthless about prioritization. False positives go in 'investigated, no action'."
+    }
+  ]
+}

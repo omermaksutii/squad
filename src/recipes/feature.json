@@ -1,0 +1,41 @@
+{
+  "name": "feature",
+  "description": "Full feature implementation pipeline: research → architect → code → test → review",
+  "headline": "Implement a new feature end-to-end with 5 specialist agents",
+  "agents": [
+    {
+      "name": "researcher",
+      "description": "Investigate the codebase to understand how this feature should fit",
+      "model": "sonnet",
+      "prompt": "TASK: {{task}}\n\nExplore the codebase. Read 5-15 relevant files. Understand:\n- Where similar features live\n- What conventions the project uses\n- What the existing data model looks like\n- What tests already exist for related code\n\nWrite your findings to a markdown file at: {{outputPath}}\n\nFormat:\n## Where this fits\n## Existing patterns to follow\n## Files we'll touch\n## Open questions\n\nBe specific — name actual files. Do not narrate. Just do it."
+    },
+    {
+      "name": "architect",
+      "description": "Design the implementation approach",
+      "dependsOn": ["researcher"],
+      "model": "opus",
+      "prompt": "TASK: {{task}}\n\nThe researcher's findings (read this carefully):\n\n{{researcher}}\n\nDesign the implementation. Decide:\n- Module/file boundaries\n- Public API\n- Data shapes\n- Error handling strategy\n- Test approach\n\nWrite a concrete design to {{outputPath}}.\n\nFormat:\n## Approach\n## Files to create/modify (exact paths)\n## Public API (with types)\n## Test plan\n## Risks\n\nBe opinionated. The coder will follow this exactly."
+    },
+    {
+      "name": "coder",
+      "description": "Implement the feature according to the design",
+      "dependsOn": ["architect"],
+      "model": "sonnet",
+      "prompt": "TASK: {{task}}\n\nFollow this design exactly:\n\n{{architect}}\n\nImplement the feature. Touch exactly the files the architect specified. Do not add unrelated changes. Match the project's existing style.\n\nWhen done, write a concise summary to {{outputPath}}:\n\n## Changes\n- file:lines\n- file:lines\n\n## How to verify\n- test command\n- expected behavior"
+    },
+    {
+      "name": "tester",
+      "description": "Write tests covering the new feature",
+      "dependsOn": ["coder"],
+      "model": "sonnet",
+      "prompt": "TASK: {{task}}\n\nThe coder's summary:\n\n{{coder}}\n\nThe architect's test plan:\n\n{{architect}}\n\nWrite tests for the new code. Follow the project's existing test conventions. Cover the happy path plus 1-2 edge cases per public function.\n\nRun the tests. Fix anything that fails (in the test, not the implementation, unless the implementation is clearly wrong).\n\nWrite to {{outputPath}}:\n\n## Tests added\n- file:test name\n\n## Result\n- N passing, N failing\n- (any actual issues found in the implementation)"
+    },
+    {
+      "name": "reviewer",
+      "description": "Review the entire change for quality and security",
+      "dependsOn": ["tester"],
+      "model": "opus",
+      "prompt": "TASK: {{task}}\n\nReview the work of the team:\n\nDESIGN:\n{{architect}}\n\nIMPLEMENTATION:\n{{coder}}\n\nTESTS:\n{{tester}}\n\nReview the actual diff. Look for:\n- Correctness vs. the design\n- Security issues (injection, auth, secrets)\n- Style/convention drift\n- Missing edge cases\n- Performance concerns\n\nWrite the review to {{outputPath}}:\n\n## Verdict\nLGTM | needs-changes | blocked\n\n## Issues\n(numbered, severity-tagged)\n\n## Suggestions\n(numbered)\n\nBe a tough reviewer. Don't rubber-stamp."
+    }
+  ]
+}

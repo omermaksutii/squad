@@ -1,0 +1,27 @@
+{
+  "name": "debug",
+  "description": "Live debugging pipeline: hypothesize → instrument → analyze",
+  "headline": "Debug an issue that's hard to reproduce — 3 agents narrow it down",
+  "agents": [
+    {
+      "name": "hypothesizer",
+      "description": "Generate ranked hypotheses about what's wrong",
+      "model": "opus",
+      "prompt": "ISSUE: {{task}}\n\nWithout fixing anything, generate 5 ranked hypotheses about the cause. For each:\n- What you'd observe if it's true\n- What test/log/probe would confirm or rule it out\n- Probability (gut feel, %)\n\nWrite to {{outputPath}}:\n\n## Hypothesis 1 (most likely): ...\n## Hypothesis 2: ...\n...\n\n## Recommended next probe\n(the cheapest hypothesis to confirm)"
+    },
+    {
+      "name": "instrumenter",
+      "description": "Add logging/probes to gather evidence",
+      "dependsOn": ["hypothesizer"],
+      "model": "sonnet",
+      "prompt": "ISSUE: {{task}}\n\nHYPOTHESES:\n{{hypothesizer}}\n\nAdd minimal instrumentation to test the top 2 hypotheses. Use the project's existing logger if possible.\n\nWrite to {{outputPath}}:\n\n## Instrumentation added\n- file:line — what it logs\n\n## How to trigger\n## What to look for"
+    },
+    {
+      "name": "analyst",
+      "description": "Run, observe, report findings",
+      "dependsOn": ["instrumenter"],
+      "model": "opus",
+      "prompt": "ISSUE: {{task}}\n\nHYPOTHESES:\n{{hypothesizer}}\n\nINSTRUMENTATION:\n{{instrumenter}}\n\nRun the trigger, observe logs/output, narrow down which hypothesis is correct.\n\nIf you can't reproduce, say so. Do NOT speculate further than the evidence supports.\n\nWrite to {{outputPath}}:\n\n## Confirmed cause (if any)\n## Ruled out\n## Still possible\n## Recommended next step\n\nThen REVERT the instrumentation (or note that the user should)."
+    }
+  ]
+}

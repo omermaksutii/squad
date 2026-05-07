@@ -1,0 +1,20 @@
+{
+  "name": "postmortem",
+  "description": "Incident postmortem pipeline: timeline → analysis → action items",
+  "headline": "Write a postmortem from logs/PRs/chat — 2 agents (no blameless box-ticking)",
+  "agents": [
+    {
+      "name": "researcher",
+      "description": "Build the timeline from available evidence",
+      "model": "sonnet",
+      "prompt": "INCIDENT: {{task}}\n\nReconstruct the timeline. Read git log, recent PRs, error logs, any incident chat threads, anything in {{cwd}} that bears on this.\n\nWrite to {{outputPath}}:\n\n## TL;DR (2 sentences)\n## Impact\n- users affected\n- duration\n- data integrity\n\n## Timeline\n(timestamped, factual, no opinions)\n\n## Evidence used\n(commits, logs, files)"
+    },
+    {
+      "name": "writer",
+      "description": "Write the postmortem with root causes and action items",
+      "dependsOn": ["researcher"],
+      "model": "opus",
+      "prompt": "INCIDENT: {{task}}\n\nRESEARCH:\n{{researcher}}\n\nWrite the postmortem. Style: blameless but not toothless. Real action items, owners, due dates.\n\nWrite to {{outputPath}}:\n\n# Postmortem: <incident>\n\n## TL;DR\n## Impact\n## Timeline\n(reuse from researcher)\n\n## Root causes\n(systemic, not 'X made a typo' — what allowed the typo to ship?)\n\n## What went well\n## What went poorly\n## Action items\n| owner | item | due | issue |\n\n## Lessons\n(2-4 short, memorable rules)\n\nDo NOT include 'be more careful' or 'pay better attention'. Those aren't action items."
+    }
+  ]
+}

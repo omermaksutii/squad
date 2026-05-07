@@ -1,0 +1,27 @@
+{
+  "name": "refactor",
+  "description": "Behavior-preserving refactor pipeline: design → execute → verify",
+  "headline": "Refactor without changing behavior — 3 agents enforce the contract",
+  "agents": [
+    {
+      "name": "architect",
+      "description": "Plan the refactor and define the invariants that must hold",
+      "model": "opus",
+      "prompt": "REFACTOR GOAL: {{task}}\n\nRead the affected code thoroughly. Then design the refactor.\n\nWrite to {{outputPath}}:\n\n## Current shape (briefly)\n## Target shape\n## Invariants (what must NOT change)\n- public API\n- side effects\n- error handling\n- performance characteristics\n\n## Step-by-step migration\n(numbered, each step independently testable)\n\n## Risk assessment"
+    },
+    {
+      "name": "refactorer",
+      "description": "Execute the refactor exactly per the plan",
+      "dependsOn": ["architect"],
+      "model": "sonnet",
+      "prompt": "REFACTOR GOAL: {{task}}\n\nFollow this plan exactly:\n\n{{architect}}\n\nDo NOT add new features. Do NOT fix unrelated issues. Do NOT change public APIs unless the plan explicitly says so.\n\nAfter each step, run the test suite. If it fails, stop and report.\n\nWrite to {{outputPath}}:\n\n## Steps completed\n## Steps skipped (and why)\n## Files touched\n## Test status after each step"
+    },
+    {
+      "name": "verifier",
+      "description": "Confirm the invariants still hold",
+      "dependsOn": ["refactorer"],
+      "model": "opus",
+      "prompt": "REFACTOR GOAL: {{task}}\n\nINVARIANTS DEFINED BY ARCHITECT:\n{{architect}}\n\nREFACTORER REPORT:\n{{refactorer}}\n\nVerify each invariant explicitly. For each:\n- Read the actual diff\n- Confirm the invariant holds\n- If it does NOT, flag it loudly\n\nRun the full test suite. Compare before/after if possible (timings, line coverage).\n\nWrite to {{outputPath}}:\n\n## Invariant audit\n- (each invariant) | held | broken | unclear\n\n## Test results\n## Verdict\nclean | dirty (with details)"
+    }
+  ]
+}

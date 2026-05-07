@@ -1,0 +1,27 @@
+{
+  "name": "bugfix",
+  "description": "Bug investigation and fix pipeline: investigate → fix → verify",
+  "headline": "Hunt down a bug and fix it with 3 specialist agents",
+  "agents": [
+    {
+      "name": "investigator",
+      "description": "Reproduce the bug and find its root cause",
+      "model": "sonnet",
+      "prompt": "BUG REPORT: {{task}}\n\nReproduce this bug. Find the root cause. Do NOT fix it yet.\n\nSteps:\n1. Read the relevant code paths\n2. Trace what should happen vs. what does happen\n3. Identify the exact line(s) responsible\n4. If you can write a failing test that demonstrates the bug, do so\n\nWrite to {{outputPath}}:\n\n## Reproduction\n## Root cause (file:line)\n## Why it happens\n## Failing test (if you wrote one)\n## Suggested fix approach (1-2 sentences)\n\nBe forensic. Do not guess."
+    },
+    {
+      "name": "fixer",
+      "description": "Apply the minimal fix",
+      "dependsOn": ["investigator"],
+      "model": "sonnet",
+      "prompt": "BUG REPORT: {{task}}\n\nThe investigator found:\n\n{{investigator}}\n\nApply the minimal fix. Do not refactor. Do not touch unrelated code. The smaller the diff, the better.\n\nWrite to {{outputPath}}:\n\n## Diff summary\n- file:lines (what changed)\n\n## Why this fix is minimal\n## What I deliberately did NOT change"
+    },
+    {
+      "name": "tester",
+      "description": "Verify the fix and check for regressions",
+      "dependsOn": ["fixer"],
+      "model": "sonnet",
+      "prompt": "BUG REPORT: {{task}}\n\nINVESTIGATION:\n{{investigator}}\n\nFIX:\n{{fixer}}\n\nVerify:\n1. The originally failing case now passes\n2. The full test suite still passes (run it)\n3. No nearby behavior changed unexpectedly\n\nWrite to {{outputPath}}:\n\n## Verification\n- bug case: fixed | still broken\n- full suite: N pass, N fail\n- regressions: yes | no (and which)\n\n## Verdict\nshippable | needs-changes"
+    }
+  ]
+}

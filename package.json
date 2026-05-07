@@ -1,0 +1,55 @@
+{
+  "name": "@omermaksutii/squad",
+  "version": "0.1.0",
+  "description": "Squad — opinionated subagent pipelines for Claude Code. One command, multi-agent in your terminal.",
+  "license": "MIT",
+  "author": "Omer Maksuti",
+  "homepage": "https://github.com/omermaksutii/squad#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/omermaksutii/squad.git"
+  },
+  "bugs": {
+    "url": "https://github.com/omermaksutii/squad/issues"
+  },
+  "keywords": [
+    "claude-code",
+    "subagents",
+    "multi-agent",
+    "pipeline",
+    "orchestrator",
+    "anthropic",
+    "ai"
+  ],
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "squad": "./bin/squad.js"
+  },
+  "files": [
+    "dist",
+    "bin",
+    "src/recipes"
+  ],
+  "scripts": {
+    "build": "tsc && node -e \"require('fs').cpSync('src/recipes','dist/recipes',{recursive:true})\"",
+    "test": "vitest run",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "commander": "^12.0.0",
+    "chalk": "^5.3.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "typescript": "^5.4.0",
+    "vitest": "^1.4.0"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
