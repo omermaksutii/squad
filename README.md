@@ -130,6 +130,9 @@ squad run ./team-recipe.json "task description"
 | `squad list` | List built-in recipes |
 | `squad show <recipe>` | Show the DAG and per-agent details |
 | `squad run <recipe> "<task>"` | Execute a pipeline |
+| `squad run … --sandbox` | Run each agent inside a Docker container (`--sandbox-network=bridge\|none`) |
+| `squad search [query]` | Search the community recipe registry |
+| `squad add <name>` | Download a recipe from the registry into `~/.squad/recipes/` |
 | `squad runs` | List recent runs in the current project |
 | `squad logs <run \| last>` | Print artifacts from a past run |
 | `squad demo` | Self-contained echo-mode walkthrough |
@@ -139,6 +142,29 @@ squad run ./team-recipe.json "task description"
 | `squad new [name]` | Scaffold a custom recipe |
 | `squad validate <file>` | Lint a recipe JSON |
 | `squad --json <subcommand>` | Machine-readable output (every command supports it) |
+
+## Community recipes
+
+The registry lives at [omermaksutii/squad-recipes](https://github.com/omermaksutii/squad-recipes) — a curated index of community-contributed recipes.
+
+```bash
+squad search auth          # find recipes
+squad add auth-flow        # save to ~/.squad/recipes/
+squad run auth-flow "..."  # use it
+```
+
+The index is cached locally for 24h with ETag revalidation. To use a private registry, set `$SQUAD_REGISTRY_INDEX` to your own index URL.
+
+## Sandbox mode
+
+Run each agent inside a Docker container — useful when you don't fully trust a recipe, or want to enforce CPU/memory caps:
+
+```bash
+squad run feature "add OAuth2" --sandbox
+squad run feature "add OAuth2" --sandbox --sandbox-network=none   # air-gapped
+```
+
+The runner image is `ghcr.io/omermaksutii/squad-runner:2`. First use pulls ~250MB; subsequent runs reuse the cached image. The sandbox needs either `$ANTHROPIC_API_KEY` or an existing `~/.claude/credentials.json` (mounted read-only).
 
 ## Cost & safety
 
@@ -150,22 +176,21 @@ squad run ./team-recipe.json "task description"
 ## Roadmap
 
 - ✅ **v1.0** — 8 built-in recipes, CLI, live TUI, echo mode, `/squad` skill, doctor, install, demo, validate, --json
-- ⏳ **v1.1** — visible agent-to-agent messaging in the TUI
-- ⏳ **v1.2** — recipe registry (browse + install community recipes)
-- ⏳ **v1.3** — sandbox mode (E2B/Docker)
-- ⏳ **v1.4** — GitHub Action / CI integration
-- ⏳ **v2.0** — parallel-execution metrics, real per-call cost from claude `--output-format json`
+- ✅ **v2.0** — handoff visualization in the TUI · recipe registry (`squad search` / `squad add`) · Docker sandbox · real per-call cost · parallel execution metrics
+- ⏳ **v2.1** — published GitHub Action on the Marketplace (`uses: omermaksutii/squad-action@v2`)
+- ⏳ **v2.2** — E2B sandbox backend (alternative to Docker)
 
 ## Development
 
 ```bash
 npm install
-npm test                # 39 tests across 9 suites, all echo mode (no claude needed)
+npm test                       # all echo mode (no claude needed)
+RUN_DOCKER_TESTS=1 npm test    # also run the live Docker sandbox tests
 npm run build
 npm run lint
 ```
 
-CI runs the same on Node 20 + 22 via `.github/workflows/ci.yml`.
+CI runs the same on Node 20 + 22 via `.github/workflows/ci.yml`. Tags push the runner image to GHCR via `.github/workflows/runner-image.yml`.
 
 ## License
 

@@ -18,11 +18,15 @@ import { runExport } from './commands/export.js';
 import { runWatch } from './commands/watch.js';
 import { runResume } from './commands/resume.js';
 import { emitCompletion } from './commands/completion.js';
+import { runSearch } from './commands/search.js';
+import { runAdd } from './commands/add.js';
+import { DockerSandbox } from './sandbox/docker.js';
+import type { SandboxAdapter, SandboxNetwork } from './sandbox/types.js';
 import { renderGraph } from './graph.js';
 import { renderMermaid } from './mermaid.js';
 import { estimateCost } from './cost.js';
 
-export const VERSION = '1.0.0';
+export const VERSION = '2.0.0';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -96,10 +100,12 @@ program
   .option('--parallel <n>', 'Max concurrent agents per layer (default unlimited)', '0')
   .option('--retry <n>', 'Retry each agent up to N times on failure', '0')
   .option('--dry-run', 'Show what would happen without spawning agents', false)
+  .option('--sandbox', 'Run each agent inside a Docker container (requires Docker)', false)
+  .option('--sandbox-network <mode>', 'bridge (default) or none', 'bridge')
   .action(async (
     name: string,
     taskParts: string[],
-    opts: { cwd: string; echo: boolean; taskFile?: string; tui: boolean; parallel: string; retry: string; dryRun: boolean },
+    opts: { cwd: string; echo: boolean; taskFile?: string; tui: boolean; parallel: string; retry: string; dryRun: boolean; sandbox: boolean; sandboxNetwork: string },
   ) => {
     let task = taskParts.join(' ').trim();
     if (opts.taskFile) {
@@ -137,6 +143,22 @@ program
       return;
     }
 
+    let sandbox: SandboxAdapter | undefined;
+    if (opts.sandbox) {
+      const network = opts.sandboxNetwork === 'none' ? 'none' : 'bridge';
+      sandbox = new DockerSandbox({
+        hostCwd: opts.cwd,
+        network: network as SandboxNetwork,
+      });
+      try {
+        await sandbox.preflight();
+      } catch (err) {
+        console.error(chalk.red('sandbox preflight failed:'), (err as Error).message);
+        process.exitCode = 2;
+        return;
+      }
+    }
+
     const tuiEnabled = opts.tui && process.stdout.isTTY && process.env.SQUAD_JSON !== '1';
     const tui = tuiEnabled ? new SquadTUI(recipe.agents) : null;
 
@@ -161,6 +183,8 @@ program
           durationMs: e.result?.durationMs,
         });
       },
+      onHandoff: ev => tui?.handoff(ev),
+      sandbox,
     });
 
     tui?.finalize();
@@ -179,6 +203,7 @@ program
         duration_ms: r.durationMs,
       })),
       failed: result.failed,
+      handoffs: result.handoffs,
     })) return;
 
     console.log('');
@@ -300,6 +325,17 @@ program
   .action(async (run: string, opts: { cwd: string; echo: boolean; tui: boolean }) => {
     await runResume(run, opts);
   });
+
+program
+  .command('search [query]')
+  .description('Search the community recipe registry')
+  .action(async (query?: string) => { await runSearch(query ?? ''); });
+
+program
+  .command('add <name>')
+  .description('Download a recipe from the registry into ~/.squad/recipes/')
+  .option('-f, --force', 'Overwrite an existing local recipe with the same name', false)
+  .action(async (name: string, opts: { force: boolean }) => { await runAdd(name, opts); });
 
 program
   .command('completion <shell>')

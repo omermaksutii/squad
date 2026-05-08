@@ -1,0 +1,16 @@
+# Squad runner image — used by `squad run --sandbox`.
+# Built and pushed by .github/workflows/runner-image.yml on tag.
+FROM node:22-slim
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends git ca-certificates \
+ && rm -rf /var/lib/apt/lists/* \
+ && npm install -g @anthropic-ai/claude-code \
+ && npm cache clean --force
+
+WORKDIR /work
+
+# claude is the default entrypoint argument; squad overrides via `docker run ... claude <args>`.
+CMD ["claude", "--help"]

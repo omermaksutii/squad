@@ -3,6 +3,7 @@ import { writeFile, readFile, mkdir, appendFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import type { AgentSpec } from './recipe.js';
+import type { SandboxAdapter } from './sandbox/types.js';
 
 export type RunResult = {
   agent: string;
@@ -30,6 +31,8 @@ export type RunOptions = {
   onTextDelta?: (agent: string, delta: string) => void;
   /** Force "echo" mode for tests — does not spawn claude, just writes a stub artifact. */
   echo?: boolean;
+  /** Optional sandbox adapter; when set, claude is invoked inside the sandbox. */
+  sandbox?: SandboxAdapter;
 };
 
 const TEMPLATE_RE = /\{\{\s*([a-zA-Z0-9_-]+)\s*\}\}/g;
@@ -79,19 +82,21 @@ export async function runAgent(spec: AgentSpec, opts: RunOptions): Promise<RunRe
   const artifactPath = join(opts.runDir, 'artifacts', `${spec.name}.md`);
   await mkdir(join(opts.runDir, 'artifacts'), { recursive: true });
 
+  const tx = (p: string): string => opts.sandbox?.translatePath?.(p) ?? p;
+
   const expandedVars: Record<string, string> = { ...opts.vars };
   for (const dep of spec.dependsOn ?? []) {
     const depFile = join(opts.runDir, 'artifacts', `${dep}.md`);
     if (existsSync(depFile)) {
       const content = await readFile(depFile, 'utf8');
       expandedVars[dep] = content;
-      expandedVars[`${dep}_path`] = depFile;
+      expandedVars[`${dep}_path`] = tx(depFile);
     }
   }
-  expandedVars.artifactDir = join(opts.runDir, 'artifacts');
-  expandedVars.cwd = opts.cwd;
+  expandedVars.artifactDir = tx(join(opts.runDir, 'artifacts'));
+  expandedVars.cwd = tx(opts.cwd);
   expandedVars.agent = spec.name;
-  expandedVars.outputPath = artifactPath;
+  expandedVars.outputPath = tx(artifactPath);
 
   const prompt = renderPrompt(spec.prompt, expandedVars);
 
@@ -119,13 +124,27 @@ export async function runAgent(spec: AgentSpec, opts: RunOptions): Promise<RunRe
   }
   args.push(
     '--append-system-prompt',
-    `You are the "${spec.name}" agent in a Squad pipeline. Your role: ${spec.description}\n\nWrite your final output to: ${artifactPath}\nBe concise. Do not narrate. Just do the work and write the artifact.`,
+    `You are the "${spec.name}" agent in a Squad pipeline. Your role: ${spec.description}\n\nWrite your final output to: ${tx(artifactPath)}\nBe concise. Do not narrate. Just do the work and write the artifact.`,
   );
 
+  let command: string;
+  let spawnArgs: string[];
+  let env: NodeJS.ProcessEnv;
+  if (opts.sandbox) {
+    const sandboxSpec = opts.sandbox.buildSpawn(args, opts.cwd);
+    command = sandboxSpec.command;
+    spawnArgs = sandboxSpec.args;
+    env = sandboxSpec.env;
+  } else {
+    command = opts.claudeBin ?? 'claude';
+    spawnArgs = args;
+    env = process.env;
+  }
+
   return await new Promise<RunResult>((resolve, reject) => {
-    const child = spawn(opts.claudeBin ?? 'claude', args, {
+    const child = spawn(command, spawnArgs, {
       cwd: opts.cwd,
-      env: process.env,
+      env,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     let stdout = '';

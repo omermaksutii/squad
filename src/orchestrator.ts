@@ -2,6 +2,8 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { type Recipe, planExecution } from './recipe.js';
 import { runAgent, type RunOptions, type RunResult } from './runner.js';
+import { buildDependentsMap, buildHandoff, type HandoffEvent } from './handoff.js';
+import type { SandboxAdapter } from './sandbox/types.js';
 
 export type OrchestrateOptions = {
   recipe: Recipe;
@@ -19,6 +21,10 @@ export type OrchestrateOptions = {
   onStdoutLine?: (line: string) => void;
   /** Status callback fired when an agent transitions state. */
   onStatusChange?: (event: StatusEvent) => void;
+  /** Handoff callback fired after an agent succeeds, before its dependents launch. */
+  onHandoff?: (event: HandoffEvent) => void;
+  /** Sandbox adapter — when set, every agent's claude invocation runs inside it. */
+  sandbox?: SandboxAdapter;
 };
 
 export type AgentStatus = 'pending' | 'running' | 'done' | 'failed' | 'skipped';
@@ -36,6 +42,7 @@ export type OrchestrationResult = {
   durationMs: number;
   results: RunResult[];
   failed: { agent: string; error: string }[];
+  handoffs: HandoffEvent[];
 };
 
 export async function orchestrate(opts: OrchestrateOptions): Promise<OrchestrationResult> {
@@ -49,8 +56,10 @@ export async function orchestrate(opts: OrchestrateOptions): Promise<Orchestrati
   );
 
   const layers = planExecution(opts.recipe);
+  const dependents = buildDependentsMap(opts.recipe);
   const results: RunResult[] = [];
   const failed: { agent: string; error: string }[] = [];
+  const handoffs: HandoffEvent[] = [];
 
   for (const a of opts.recipe.agents) {
     opts.onStatusChange?.({ agent: a.name, status: 'pending' });
@@ -73,6 +82,7 @@ export async function orchestrate(opts: OrchestrateOptions): Promise<Orchestrati
             vars: { task: opts.task },
             echo: opts.echo,
             onStdoutLine: opts.onStdoutLine,
+            sandbox: opts.sandbox,
           });
           lastResult = r;
           if (r.exitCode === 0) return r;
@@ -98,6 +108,14 @@ export async function orchestrate(opts: OrchestrateOptions): Promise<Orchestrati
         results.push(r);
         if (r.exitCode === 0) {
           opts.onStatusChange?.({ agent: spec.name, status: 'done', result: r });
+          const targets = dependents.get(spec.name) ?? [];
+          if (targets.length > 0) {
+            const ev = await buildHandoff(spec.name, targets, r.artifactPath);
+            if (ev) {
+              handoffs.push(ev);
+              opts.onHandoff?.(ev);
+            }
+          }
         } else {
           failed.push({ agent: spec.name, error: `exit ${r.exitCode}: ${r.stderr.slice(0, 200)}` });
           opts.onStatusChange?.({ agent: spec.name, status: 'failed', result: r });
@@ -129,6 +147,7 @@ export async function orchestrate(opts: OrchestrateOptions): Promise<Orchestrati
     durationMs: Date.now() - start,
     results,
     failed,
+    handoffs,
   };
   await writeFile(join(runDir, 'summary.json'), JSON.stringify(summary, null, 2));
   return summary;

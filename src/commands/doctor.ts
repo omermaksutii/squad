@@ -58,6 +58,31 @@ export async function runDoctor(): Promise<void> {
     detail: userRecipesExists ? userRecipes : '(none — run `squad new <name>` to scaffold)',
   });
 
+  // docker (only fail if user opted into sandbox checks)
+  const checkDocker = process.argv.includes('--sandbox') || process.env.SQUAD_DOCTOR_SANDBOX === '1';
+  const dockerVer = spawnSyncSafe('docker', ['--version']);
+  const dockerOk = (dockerVer.status ?? 1) === 0;
+  if (checkDocker || dockerOk) {
+    checks.push({
+      name: 'docker',
+      ok: dockerOk,
+      warn: !dockerOk && !checkDocker,
+      detail: dockerOk
+        ? dockerVer.stdout?.toString().trim()
+        : 'optional — required only for `squad run --sandbox`',
+    });
+  }
+  if (dockerOk) {
+    const info = spawnSyncSafe('docker', ['info']);
+    const daemonOk = (info.status ?? 1) === 0;
+    checks.push({
+      name: 'docker daemon',
+      ok: daemonOk,
+      warn: !daemonOk && !checkDocker,
+      detail: daemonOk ? 'reachable' : 'start Docker Desktop / dockerd to use --sandbox',
+    });
+  }
+
   if (writeJsonResult({ checks })) return;
 
   let allOk = true;
