@@ -1,5 +1,5 @@
 {
-  "name": "@omermaksutii/squad",
+  "name": "@squadkit/squad",
   "version": "2.0.0",
   "description": "Squad — opinionated subagent pipelines for Claude Code. One command, multi-agent in your terminal.",
   "license": "MIT",

@@ -2,7 +2,7 @@
 
 > Opinionated subagent pipelines for Claude Code. One command, multi-agent in your terminal.
 
-[![npm](https://img.shields.io/npm/v/@omermaksutii/squad?color=cb3837)](https://www.npmjs.com/package/@omermaksutii/squad)
+[![npm](https://img.shields.io/npm/v/@squadkit/squad?color=cb3837)](https://www.npmjs.com/package/@squadkit/squad)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 ```
@@ -25,7 +25,7 @@ Subagents in Claude Code are powerful but wiring them is painful — same boiler
 ## Install
 
 ```bash
-npm install -g @omermaksutii/squad
+npm install -g @squadkit/squad
 squad install     # adds /squad skill to your Claude Code
 squad doctor      # verify
 ```
