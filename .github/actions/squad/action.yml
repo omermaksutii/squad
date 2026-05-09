@@ -24,7 +24,7 @@ runs:
   steps:
     - name: Install Squad
       shell: bash
-      run: npm install -g @omermaksutii/squad@${{ inputs.squad-version }}
+      run: npm install -g @squadkit/squad@${{ inputs.squad-version }}
     - name: Run pipeline
       shell: bash
       run: |
